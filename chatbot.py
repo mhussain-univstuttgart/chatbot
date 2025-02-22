@@ -36,22 +36,24 @@ def load_full_data():
 FULL_CONTEXT = load_full_data()
 logger.info("Full data.txt loaded into memory.")
 
+
 # Chat API Endpoint with structured OpenAI response
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     logger.info(f"Received chat request: {request}")
 
     # Generate chatbot response using full context
-    completion = client.chat.completions.create(
+    completion = client.beta.chat.completions.parse(
         model="gpt-4o",
         messages=[
             {"role": "system",
-             "content": "Provide a structured JSON response in the following format: {\"response\": \"LLM response message\", \"matching\": [\"name_0\", \"name_1\", \"name_2\"]}. "
-                        "If there is no matching info return empty match"},
+             "content": "You are provided with set of Service categories and Service Names in the category. "
+                        "Help user find Service Names matching his requirment or problems in the matching field. "
+                        "Provide a structured JSON response in the following format: {\"response\": \"LLM response message\", \"matching\": [\"name_0\", \"name_1\", \"name_2\"]}."},
             {"role": "user", "content": request.user_input},
             {"role": "assistant", "content": FULL_CONTEXT}
         ],
-        response_format={"type": "json_object"}
+        response_format=ChatResponse
     )
 
     response_data = completion.choices[0].message.content
