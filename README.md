@@ -1,4 +1,4 @@
-# AI-Powered Chatbot with Vector Search
+# AI-Powered Chatbot
 
 A FastAPI-based chatbot application that uses OpenAI's GPT-3.5 Turbo for generating responses and sentence transformers for semantic search functionality.
 
