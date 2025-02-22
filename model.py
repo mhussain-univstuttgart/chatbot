@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     user_id: str
     user_input: str
 
+
 class ChatResponse(BaseModel):
     response: str
-    matching: Optional[List[str]]
+    matching: List[str]

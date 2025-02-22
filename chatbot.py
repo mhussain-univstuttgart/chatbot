@@ -1,14 +1,16 @@
 import os
+import sqlite3
 import logging
 import uvicorn
+from typing import List
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
-from sentence_transformers import SentenceTransformer
+from db import setup_database, get_db_connection
 from model import ChatRequest, ChatResponse
-from db import find_matches_and_context
-from utils import get_db_connection
 
+# Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
@@ -19,45 +21,57 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI app
 app = FastAPI()
 
-# Load embedding model
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-
 # OpenAI client
 client = OpenAI(api_key=openai_api_key)
 
-# Chat API Endpoint
+setup_database()
+
+# Load entire data.txt file into memory
+def load_full_data():
+    logger.info("Loading full data.txt into memory...")
+    with open("data.txt", "r", encoding="utf-8") as file:
+        return file.read()
+
+
+FULL_CONTEXT = load_full_data()
+logger.info("Full data.txt loaded into memory.")
+
+# Chat API Endpoint with structured OpenAI response
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     logger.info(f"Received chat request: {request}")
 
-    # Find relevant matches and create structured context
-    matches, structured_context = find_matches_and_context(request.user_input)
-
-    # Generate chatbot response using context
-    chatbot_response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+    # Generate chatbot response using full context
+    completion = client.chat.completions.create(
+        model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are a helpful chatbot that provides structured information."},
+            {"role": "system",
+             "content": "Provide a structured JSON response in the following format: {\"response\": \"LLM response message\", \"matching\": [\"name_0\", \"name_1\", \"name_2\"]}. "
+                        "If there is no matching info return empty match"},
             {"role": "user", "content": request.user_input},
-            {"role": "assistant", "content": structured_context}
-        ]
-    ).choices[0].message.content
+            {"role": "assistant", "content": FULL_CONTEXT}
+        ],
+        response_format={"type": "json_object"}
+    )
+
+    response_data = completion.choices[0].message.content
+
+    try:
+        structured_response = ChatResponse.parse_raw(response_data)
+    except Exception as e:
+        logger.error(f"Failed to parse response as JSON: {e}")
+        raise HTTPException(status_code=500, detail="Failed to parse chatbot response")
 
     # Store message in database
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("INSERT INTO message (dialog_id, user_input, chatbot_response) VALUES (?, ?, ?)",
-                   (request.dialog_id, request.user_input, chatbot_response))
-    message_id = cursor.lastrowid
-
-    # Store matches
-    for match in matches:
-        cursor.execute("INSERT INTO matching (message_id, match_name) VALUES (?, ?)", (message_id, match))
+                   (request.dialog_id, request.user_input, structured_response.response))
     conn.commit()
     conn.close()
 
-    logger.info(f"Response generated for dialog_id {request.dialog_id} with matches: {matches}")
-    return ChatResponse(response=chatbot_response, matching=matches or [])
+    logger.info(f"Response generated for dialog_id {request.dialog_id}")
+    return structured_response
 
 
 if __name__ == "__main__":
